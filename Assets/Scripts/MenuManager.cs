@@ -26,6 +26,22 @@ public class MenuManager : MonoBehaviour
     [SerializeField] private BallController ball;
     [SerializeField] private GameManager gameManager;
 
+    [Header("Game Objects / Oyun Nesneleri")]
+    [Tooltip("Ball GameObject / Top nesnesi")]
+    [SerializeField] private GameObject ballObject;
+
+    [Tooltip("Top paddle GameObject / Üst raket nesnesi")]
+    [SerializeField] private GameObject paddleTopObject;
+
+    [Tooltip("Bottom paddle GameObject / Alt raket nesnesi")]
+    [SerializeField] private GameObject paddleBottomObject;
+
+    [Tooltip("Left wall GameObject / Sol duvar nesnesi")]
+    [SerializeField] private GameObject wallLeft;
+
+    [Tooltip("Right wall GameObject / Sağ duvar nesnesi")]
+    [SerializeField] private GameObject wallRight;
+
     private void Start()
     {
         // Show main menu at start / Başlangıçta ana menüyü göster
@@ -43,6 +59,9 @@ public class MenuManager : MonoBehaviour
         inGamePanel.SetActive(false);
         if (scoreTextPanel != null) scoreTextPanel.SetActive(false);
 
+        // Hide gameplay objects / Oyun nesnelerini gizle
+        SetGameplayObjectsActive(false);
+
         // Reset ball and scores / Topu ve skorları sıfırla
         if (ball != null) ball.ResetBall();
         if (gameManager != null) gameManager.RestartGame();
@@ -51,13 +70,14 @@ public class MenuManager : MonoBehaviour
     // Called when "1vs1" button is pressed / "1vs1" butonuna basılınca çağrılır
     public void OnPvPButtonClicked()
     {
+        // Start the game first to activate objects / Önce oyunu başlat ki nesneler aktif olsun
+        StartGame();
+
         // Set top paddle to Player controlled / Üst raketi oyuncu kontrolüne al
         if (paddleTop != null)
         {
             paddleTop.SetAIEnabled(false);
         }
-
-        StartGame();
     }
 
     // Called when "1vsAI" button is pressed / "1vsAI" butonuna basılınca çağrılır
@@ -86,16 +106,25 @@ public class MenuManager : MonoBehaviour
         SetAIDifficultyAndStart(AIDifficulty.Hard);
     }
 
+    // Called when Expert button is pressed / Uzman butonuna basılınca çağrılır
+    public void OnExpertButtonClicked()
+    {
+        SetAIDifficultyAndStart(AIDifficulty.Expert);
+    }
+
     // Sets AI difficulty and starts the game / Yapay zeka zorluğunu ayarlayıp oyunu başlatır
     private void SetAIDifficultyAndStart(AIDifficulty difficulty)
     {
+        // Start the game first to activate objects / Önce oyunu başlat ki nesneler aktif olsun
+        StartGame();
+
+        // Now set AI mode (ball is active, so FindGameObjectWithTag will work)
+        // Şimdi AI modunu ayarla (top aktif olduğu için FindGameObjectWithTag çalışacak)
         if (paddleTop != null)
         {
             paddleTop.SetAIEnabled(true);
             paddleTop.SetDifficulty(difficulty);
         }
-
-        StartGame();
     }
 
     // Starts the game / Oyunu başlatır
@@ -106,12 +135,25 @@ public class MenuManager : MonoBehaviour
         inGamePanel.SetActive(true);
         if (scoreTextPanel != null) scoreTextPanel.SetActive(true);
 
+        // Show gameplay objects / Oyun nesnelerini göster
+        SetGameplayObjectsActive(true);
+
         // Reset and start / Sıfırla ve başlat
         if (gameManager != null) gameManager.RestartGame();
         if (ball != null) ball.ResetBall();
 
         // Unpause / Oyunu devam ettir
         Time.timeScale = 1f;
+    }
+
+    // Activates or deactivates all gameplay objects / Tüm oyun nesnelerini aktif veya deaktif yapar
+    private void SetGameplayObjectsActive(bool active)
+    {
+        if (ballObject != null) ballObject.SetActive(active);
+        if (paddleTopObject != null) paddleTopObject.SetActive(active);
+        if (paddleBottomObject != null) paddleBottomObject.SetActive(active);
+        if (wallLeft != null) wallLeft.SetActive(active);
+        if (wallRight != null) wallRight.SetActive(active);
     }
 
     // Called when back button is pressed during game / Oyun sırasında geri butonuna basılınca çağrılır

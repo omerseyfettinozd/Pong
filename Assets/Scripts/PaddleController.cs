@@ -6,7 +6,8 @@ public enum AIDifficulty
 {
     Easy,   // Kolay
     Normal, // Orta
-    Hard    // Zor
+    Hard,   // Zor
+    Expert  // Uzman
 }
 
 public class PaddleController : MonoBehaviour
@@ -27,6 +28,7 @@ public class PaddleController : MonoBehaviour
 
     private Transform ball;
     private Rigidbody2D rb;
+    private Rigidbody2D ballRb;       // Ball's Rigidbody for velocity / Topun Rigidbody'si hız için
     private Camera mainCamera;
     private float targetX;
     private float aiSmoothing;
@@ -34,11 +36,17 @@ public class PaddleController : MonoBehaviour
     // AI difficulty parameters / Yapay zeka zorluk parametreleri
     private float aiErrorRange;       // How much AI misses the ball / YZ'nın topu kaçırma miktarı
     private float aiReactionDelay;    // Delay before AI reacts / YZ'nın tepki gecikmesi
+    private float aiReturnSpeed;      // Speed of returning to center / Merkeze dönüş hızı
 
     private float reactionTimer;
     private float currentError;       // Cached error value / Saklanan hata değeri
     private float errorTimer;         // Timer for updating error / Hata güncelleme zamanlayıcısı
     private const float ERROR_UPDATE_INTERVAL = 0.5f; // Update error every 0.5s / Hatayı 0.5 saniyede bir güncelle
+    private const float DEAD_ZONE = 0.08f; // Prevents micro-jitter / Mikro titreşimi önler
+
+    // Screen bounds for clamping / Ekran sınırları için
+    private float minX;
+    private float maxX;
 
     private void Awake()
     {
@@ -47,27 +55,47 @@ public class PaddleController : MonoBehaviour
         ApplyDifficulty();
     }
 
+    // Calculates screen bounds for paddle movement / Raket hareketi için ekran sınırlarını hesaplar
+    private void CalculateBounds()
+    {
+        if (mainCamera == null) return;
+        float camHalfWidth = mainCamera.orthographicSize * mainCamera.aspect;
+        float paddleHalfWidth = 0.8f; // Approximate paddle half-width / Yaklaşık raket yarı genişliği
+        minX = -camHalfWidth + paddleHalfWidth;
+        maxX = camHalfWidth - paddleHalfWidth;
+    }
+
     // Sets AI parameters based on difficulty / Zorluğa göre YZ parametrelerini ayarlar
     private void ApplyDifficulty()
     {
         switch (difficulty)
         {
             case AIDifficulty.Easy:
-                aiSmoothing = 3f;       // Slow reaction / Yavaş tepki
+                aiSmoothing = 3f;       // Slow tracking / Yavaş takip
                 aiErrorRange = 1.5f;    // Misses more / Daha çok kaçırır
                 aiReactionDelay = 0.4f; // Delayed reaction / Gecikmeli tepki
+                aiReturnSpeed = 1f;     // Slow return / Yavaş dönüş
                 break;
 
             case AIDifficulty.Normal:
-                aiSmoothing = 6f;       // Medium reaction / Orta tepki
+                aiSmoothing = 6f;       // Medium tracking / Orta takip
                 aiErrorRange = 0.5f;    // Sometimes misses / Bazen kaçırır
                 aiReactionDelay = 0.15f; // Slight delay / Hafif gecikme
+                aiReturnSpeed = 2f;     // Medium return / Orta dönüş
                 break;
 
             case AIDifficulty.Hard:
-                aiSmoothing = 12f;      // Fast reaction / Hızlı tepki
+                aiSmoothing = 12f;      // Fast tracking / Hızlı takip
                 aiErrorRange = 0.1f;    // Rarely misses / Nadiren kaçırır
                 aiReactionDelay = 0f;   // No delay / Gecikme yok
+                aiReturnSpeed = 3f;     // Fast return / Hızlı dönüş
+                break;
+
+            case AIDifficulty.Expert:
+                aiSmoothing = 18f;      // Very fast tracking / Çok hızlı takip
+                aiErrorRange = 0.02f;   // Almost never misses / Neredeyse hiç kaçırmaz
+                aiReactionDelay = 0f;   // No delay / Gecikme yok
+                aiReturnSpeed = 4f;     // Very fast return / Çok hızlı dönüş
                 break;
         }
     }
@@ -75,16 +103,24 @@ public class PaddleController : MonoBehaviour
     private void Start()
     {
         targetX = transform.position.x;
+        CalculateBounds(); // After CameraResizer / CameraResizer'dan sonra
 
         // Find the ball object if AI is enabled
         // Eğer yapay zeka aktifse top nesnesini bul
         if (isAI)
         {
-            GameObject ballObj = GameObject.FindGameObjectWithTag("Ball");
-            if (ballObj != null)
-            {
-                ball = ballObj.transform;
-            }
+            FindBall();
+        }
+    }
+
+    // Finds and caches the ball references / Top referanslarını bulur ve saklar
+    private void FindBall()
+    {
+        GameObject ballObj = GameObject.FindGameObjectWithTag("Ball");
+        if (ballObj != null)
+        {
+            ball = ballObj.transform;
+            ballRb = ballObj.GetComponent<Rigidbody2D>();
         }
     }
 
@@ -110,10 +146,10 @@ public class PaddleController : MonoBehaviour
     }
 
     // Smoothly moves player paddle / Oyuncu raketini yumuşak hareket ettirir
-    // Walls stop the paddle via colliders / Duvarlar raketi collider ile durdurur
     private void MovePlayer()
     {
         float newX = Mathf.Lerp(transform.position.x, targetX, smoothing * Time.fixedDeltaTime);
+        newX = Mathf.Clamp(newX, minX, maxX); // Clamp to screen bounds / Ekran sınırlarına sıkıştır
         rb.MovePosition(new Vector2(newX, transform.position.y));
     }
 
@@ -192,32 +228,89 @@ public class PaddleController : MonoBehaviour
         }
     }
 
-    // Handles AI Movement with difficulty-based behavior
-    // Zorluk seviyesine göre yapay zeka hareketi
+    // --- PREDICTIVE AI SYSTEM / TAHMİNE DAYALI YAPAY ZEKA SİSTEMİ ---
+
+    // Main AI movement logic / Ana YZ hareket mantığı
     private void MoveAI()
     {
-        if (ball == null) return;
+        if (ball == null || ballRb == null) return;
 
-        // Reaction delay: AI waits before responding / Tepki gecikmesi: YZ cevap vermeden önce bekler
-        reactionTimer += Time.fixedDeltaTime;
-        if (reactionTimer < aiReactionDelay)
+        Vector2 ballVel = ballRb.linearVelocity;
+
+        // Is the ball coming toward this paddle? / Top bu rakete doğru mu geliyor?
+        bool ballComingToward = (isTopSide && ballVel.y > 0) || (!isTopSide && ballVel.y < 0);
+
+        float aiTargetX;
+        float effectiveSmoothing;
+
+        if (ballComingToward && ballVel.sqrMagnitude > 0.1f)
         {
-            return; // AI is "thinking" / YZ "düşünüyor"
+            // --- BALL APPROACHING: Predict and intercept / TOP YAKLAŞIYOR: Tahmin et ve karşıla ---
+
+            // Reaction delay: AI waits before responding / Tepki gecikmesi
+            reactionTimer += Time.fixedDeltaTime;
+            if (reactionTimer < aiReactionDelay) return;
+
+            // Update error value periodically / Hata değerini periyodik güncelle
+            errorTimer += Time.fixedDeltaTime;
+            if (errorTimer >= ERROR_UPDATE_INTERVAL)
+            {
+                currentError = Random.Range(-aiErrorRange, aiErrorRange);
+                errorTimer = 0f;
+            }
+
+            // Predict where ball will land + add error / Topun düşeceği yeri tahmin et + hata ekle
+            aiTargetX = PredictBallLandingX(ball.position, ballVel) + currentError;
+            effectiveSmoothing = aiSmoothing;
+        }
+        else
+        {
+            // --- BALL GOING AWAY: Slowly return to center / TOP UZAKLAŞIYOR: Yavaşça merkeze dön ---
+            reactionTimer = 0f; // Reset for next approach / Sonraki yaklaşım için sıfırla
+            aiTargetX = 0f;     // Center of field / Alanın ortası
+            effectiveSmoothing = aiReturnSpeed;
         }
 
-        // Update error value periodically, NOT every frame / Hata değerini her frame değil, belirli aralıklarla güncelle
-        errorTimer += Time.fixedDeltaTime;
-        if (errorTimer >= ERROR_UPDATE_INTERVAL)
-        {
-            currentError = Random.Range(-aiErrorRange, aiErrorRange);
-            errorTimer = 0f;
-        }
+        // Dead zone: don't move if already close enough / Ölü bölge: yeterince yakınsa hareket etme
+        if (Mathf.Abs(transform.position.x - aiTargetX) < DEAD_ZONE) return;
 
-        float aiTargetX = ball.position.x + currentError;
-
-        // Smoothly follow the ball / Topu yumuşak şekilde takip et
-        float newX = Mathf.Lerp(transform.position.x, aiTargetX, aiSmoothing * Time.fixedDeltaTime);
+        // Smooth movement toward target / Hedefe doğru yumuşak hareket
+        float newX = Mathf.Lerp(transform.position.x, aiTargetX, effectiveSmoothing * Time.fixedDeltaTime);
+        newX = Mathf.Clamp(newX, minX, maxX); // Clamp to screen bounds / Ekran sınırlarına sıkıştır
         rb.MovePosition(new Vector2(newX, transform.position.y));
+    }
+
+    // Predicts where the ball will reach this paddle's Y level, accounting for wall bounces
+    // Topun bu raketin Y seviyesine ulaşacağı yeri tahmin eder, duvar sekmelerini hesaba katar
+    private float PredictBallLandingX(Vector2 ballPos, Vector2 ballVel)
+    {
+        float paddleY = transform.position.y;
+
+        // Safety check / Güvenlik kontrolü
+        if (Mathf.Abs(ballVel.y) < 0.01f) return ballPos.x;
+
+        // Time for ball to reach paddle's Y / Topun raket Y'sine ulaşma süresi
+        float timeToReach = (paddleY - ballPos.y) / ballVel.y;
+        if (timeToReach < 0) return ballPos.x;
+
+        // Raw predicted X without wall bounces / Duvar sekmeleri olmadan ham tahmin X
+        float predictedX = ballPos.x + ballVel.x * timeToReach;
+
+        // Simulate wall bounces using PingPong / PingPong ile duvar sekmelerini simüle et
+        float camHalfWidth = mainCamera.orthographicSize * mainCamera.aspect;
+        float wallMargin = 0.5f; // Approximate wall+ball offset / Yaklaşık duvar+top payı
+        float leftBound = -camHalfWidth + wallMargin;
+        float rightBound = camHalfWidth - wallMargin;
+        float fieldWidth = rightBound - leftBound;
+
+        if (fieldWidth <= 0) return predictedX;
+
+        // PingPong simulates the ball bouncing back and forth between walls
+        // PingPong, topun duvarlar arasında sekme hareketini simüle eder
+        float normalizedX = predictedX - leftBound;
+        normalizedX = Mathf.PingPong(normalizedX, fieldWidth);
+
+        return normalizedX + leftBound;
     }
 
     // Called externally to change difficulty at runtime / Çalışma zamanında zorluğu değiştirmek için dışarıdan çağrılır
@@ -234,13 +327,9 @@ public class PaddleController : MonoBehaviour
         isAI = enabled;
 
         // If AI just enabled, find the ball / YZ yeni açıldıysa topu bul
-        if (isAI && ball == null)
+        if (isAI && (ball == null || ballRb == null))
         {
-            GameObject ballObj = GameObject.FindGameObjectWithTag("Ball");
-            if (ballObj != null)
-            {
-                ball = ballObj.transform;
-            }
+            FindBall();
         }
     }
 }

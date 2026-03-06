@@ -24,14 +24,24 @@ public class GameManager : MonoBehaviour
 
     private void Awake()
     {
-        // Cihazın ekran yenileme hızını (Hz) alıp FPS limitini ona göre ayarlıyoruz (Mobil, Windows vb. tüm platformlar için) / Sets target FPS to match screen refresh rate
-        Application.targetFrameRate = Mathf.RoundToInt((float)Screen.currentResolution.refreshRateRatio.value);
-        
-        // Eğer cihazın yenileme hızı alınamazsa (örneğin bazı sistemlerde 0 dönebilir), limiti devre dışı bırakıyoruz (-1 ile)
-        if (Application.targetFrameRate <= 0)
+        // --- FPS SETTINGS (Android optimized) / FPS AYARLARI (Android için optimize) ---
+        // Max 120 FPS cap / Maksimum 120 FPS limiti
+        int screenRefreshRate = Mathf.RoundToInt((float)Screen.currentResolution.refreshRateRatio.value);
+        if (screenRefreshRate > 0)
         {
-            Application.targetFrameRate = -1;
+            Application.targetFrameRate = Mathf.Min(screenRefreshRate, 120);
         }
+        else
+        {
+            Application.targetFrameRate = 120; // Default cap / Varsayılan limit
+        }
+
+        // Disable VSync for consistent frame pacing on mobile / Mobilde tutarlı frame hızı için VSync kapat
+        QualitySettings.vSyncCount = 0;
+
+        // --- PHYSICS SETTINGS / FİZİK AYARLARI ---
+        // Higher physics tick rate for smoother ball at high speeds / Yüksek hızlarda daha pürüzsüz top için fizik tick hızını artır
+        Time.fixedDeltaTime = 1f / 120f; // 120 Hz physics / 120 Hz fizik
 
         if (Instance != null && Instance != this)
         {
